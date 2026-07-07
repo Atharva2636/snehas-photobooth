@@ -112,7 +112,23 @@ export interface PlacedSticker {
   x: number; // 0..1 relative to strip
   y: number;
   scale: number;
+  rot: number; // degrees
 }
+
+// Soft Pinterest-core paper tones for the photo strip frame.
+export interface FrameColor {
+  id: string;
+  name: string;
+  value: string;
+}
+
+export const FRAME_COLORS: FrameColor[] = [
+  { id: "cream", name: "Buttery Cream", value: "#f6ead9" },
+  { id: "blush", name: "Soft Blush", value: "#fbe6e2" },
+  { id: "sage", name: "Muted Sage", value: "#dbe1cf" },
+  { id: "lavender", name: "Lavender Gray", value: "#e4e0ec" },
+  { id: "sky", name: "Dusty Sky", value: "#d9e6ec" },
+];
 
 export const svgToDataUrl = (svg: string) =>
   `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;

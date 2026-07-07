@@ -12,23 +12,37 @@ export interface BoothMessage {
 interface Options {
   roomId: string;
   isHost: boolean;
+  restart?: number;
   onMessage?: (msg: BoothMessage) => void;
 }
 
+const PEER_OPTIONS = {
+  // Google's public STUN servers for reliable NAT traversal across networks.
+  config: {
+    iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+    ],
+  },
+};
+
 /**
- * Establishes a direct P2P (WebRTC) link between two guests using PeerJS.
- * The host owns the room id; the guest dials into it. Both share their camera
- * and a data channel used to synchronise the countdown and exchange frames.
+ * Establishes a direct P2P (WebRTC) link between two people using PeerJS.
+ * The host registers a peer under the room id; the guest dials into it and keeps
+ * re-dialing until connected, so the link survives the host refreshing or the
+ * guest arriving first. The single media call is inherently bidirectional: when
+ * the host answers with its stream, both sides receive each other's video.
  */
-export function usePeerBooth({ roomId, isHost, onMessage }: Options) {
+export function usePeerBooth({ roomId, isHost, restart = 0, onMessage }: Options) {
   const [status, setStatus] = useState<BoothStatus>("init");
-  const [error, setError] = useState<string | null>(null);
+  const [error] = useState<string | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [placeholder, setPlaceholder] = useState(false);
 
   const peerRef = useRef<Peer | null>(null);
   const connRef = useRef<DataConnection | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const placeholderStop = useRef<(() => void) | null>(null);
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
@@ -43,6 +57,13 @@ export function usePeerBooth({ roomId, isHost, onMessage }: Options) {
   useEffect(() => {
     let cancelled = false;
     let peer: Peer | null = null;
+    let redial: ReturnType<typeof setInterval> | null = null;
+    let pending: DataConnection | null = null;
+
+    const answerCall = (call: MediaConnection, stream: MediaStream) => {
+      call.answer(stream);
+      call.on("stream", (rs) => setRemoteStream(rs));
+    };
 
     (async () => {
       let stream: MediaStream;
@@ -65,74 +86,97 @@ export function usePeerBooth({ roomId, isHost, onMessage }: Options) {
         placeholderStop.current?.();
         return;
       }
+      streamRef.current = stream;
       setLocalStream(stream);
       setStatus("waiting");
 
-      // Google's public STUN servers for reliable NAT traversal across different
-      // Wi-Fi networks and mobile carriers.
-      const peerOptions = {
-        config: {
-          iceServers: [
-            { urls: "stun:stun.l.google.com:19302" },
-            { urls: "stun:stun1.l.google.com:19302" },
-          ],
-        },
-      };
-      peer = isHost ? new Peer(roomId, peerOptions) : new Peer(peerOptions);
+      peer = isHost ? new Peer(roomId, PEER_OPTIONS) : new Peer(PEER_OPTIONS);
       peerRef.current = peer;
 
-      // Guest: dial the host. If the host peer isn't registered yet, retry a few
-      // times so opening the shared link reliably lands both feeds in the studio.
-      let attempts = 0;
-      const dialHost = () => {
-        if (cancelled || connRef.current?.open) return;
-        attempts += 1;
-        const conn = peer!.connect(roomId, { reliable: true });
-        bindConnection(conn);
-        const call = peer!.call(roomId, stream);
-        call.on("stream", (rs) => setRemoteStream(rs));
-      };
+      // Both sides answer any incoming media call (reciprocal video).
+      peer.on("call", (call: MediaConnection) => answerCall(call, stream));
+      // Host (and guest, harmlessly) accept incoming data connections.
+      peer.on("connection", bindConnection);
 
       peer.on("error", (err) => {
-        // Connection hiccups are expected and non-fatal:
-        //  - "peer-unavailable": the host peer isn't registered yet (guest opened
-        //    the link first, or we're in a single-user preview with no partner).
-        //  - broker/network blips in a sandbox.
-        // We stay in the room (placeholder + solo capture keep working) and simply
-        // retry the guest dial. This is normal flow, so we don't log it as an error.
+        // Non-fatal: unreachable host, sandbox broker blips, id-not-ready, etc.
+        // The guest's periodic re-dial recovers automatically.
         if (cancelled) return;
-        if (!isHost && err?.type === "peer-unavailable" && attempts < 8) {
-          setTimeout(dialHost, 1200);
-        }
+        void err;
       });
 
-      if (isHost) {
-        peer.on("connection", bindConnection);
-        peer.on("call", (call: MediaConnection) => {
-          call.answer(stream);
+      if (!isHost) {
+        const dial = () => {
+          if (cancelled || connRef.current?.open || !peer || peer.destroyed || !peer.open) return;
+          try {
+            pending?.close();
+          } catch {
+            /* noop */
+          }
+          pending = peer.connect(roomId, { reliable: true });
+          bindConnection(pending);
+          const call = peer.call(roomId, stream);
           call.on("stream", (rs) => setRemoteStream(rs));
-        });
-      } else {
-        peer.on("open", dialHost);
+        };
+        peer.on("open", dial);
+        // Keep re-dialing until connected so refresh / late-join reliably links up.
+        redial = setInterval(() => {
+          if (!connRef.current?.open) dial();
+        }, 2500);
       }
     })();
 
     return () => {
       cancelled = true;
-      connRef.current?.close();
+      if (redial) clearInterval(redial);
+      try {
+        connRef.current?.close();
+      } catch {
+        /* noop */
+      }
       peerRef.current?.destroy();
+      peerRef.current = null;
+      connRef.current = null;
       placeholderStop.current?.();
+      placeholderStop.current = null;
       setLocalStream((s) => {
         s?.getTracks().forEach((t) => t.stop());
         return null;
       });
+      setRemoteStream(null);
+      setStatus("init");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, isHost, bindConnection]);
+  }, [roomId, isHost, restart, bindConnection]);
+
+  // Free the peer id promptly on tab close/refresh so a returning host can reclaim it.
+  useEffect(() => {
+    const onUnload = () => peerRef.current?.destroy();
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
+  }, []);
 
   const sendData = useCallback((msg: BoothMessage) => {
     if (connRef.current && connRef.current.open) connRef.current.send(msg);
   }, []);
 
-  return { status, error, localStream, remoteStream, sendData, placeholder };
+  // Fully release the hardware webcam and tear down the session (used on export).
+  const shutdown = useCallback(() => {
+    try {
+      connRef.current?.close();
+    } catch {
+      /* noop */
+    }
+    peerRef.current?.destroy();
+    peerRef.current = null;
+    connRef.current = null;
+    placeholderStop.current?.();
+    placeholderStop.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    setLocalStream(null);
+    setRemoteStream(null);
+  }, []);
+
+  return { status, error, localStream, remoteStream, sendData, placeholder, shutdown };
 }

@@ -2,8 +2,9 @@ import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { Camera, Loader2, Sliders, LayoutGrid, Wifi, WifiOff } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { FILTERS, TEMPLATES, type Filter, type Template } from "../lib/booth";
-import { composeStrip, grabFrame, type Pair } from "../lib/compose";
+import { composeStrip, grabFrame, waitForVideoReady, type Pair } from "../lib/compose";
 import type { BoothMessage } from "../lib/usePeerBooth";
+import { HomeButton } from "./HomeButton";
 
 interface Props {
   isHost: boolean;
@@ -13,6 +14,7 @@ interface Props {
   placeholder?: boolean;
   sendData: (m: BoothMessage) => void;
   onMessageRef: MutableRefObject<((m: BoothMessage) => void) | undefined>;
+  onHome: () => void;
   onComplete: (canvas: HTMLCanvasElement, template: Template, filter: Filter, pairs: Pair[]) => void;
 }
 
@@ -25,7 +27,7 @@ const drawerItem = (i: number) => ({
   transition: { duration: 0.45, delay: i * 0.06, ease: [0.22, 0.61, 0.36, 1] as const },
 });
 
-export function Studio({ isHost, connected, localStream, remoteStream, placeholder, sendData, onMessageRef, onComplete }: Props) {
+export function Studio({ isHost, connected, localStream, remoteStream, placeholder, sendData, onMessageRef, onHome, onComplete }: Props) {
   const myVideo = useRef<HTMLVideoElement>(null);
   const partnerVideo = useRef<HTMLVideoElement>(null);
 
@@ -96,6 +98,10 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
     partnerFrames.current = {};
     setCapturing(true);
     if (initiator) sendData({ type: "start", template: tpl.id, filter: flt.id });
+
+    // Ensure the video is actually decoding frames before we draw, otherwise the
+    // canvas grabs a blank/transparent frame.
+    await waitForVideoReady(myVideo.current);
 
     const selfFrames: string[] = [];
     const otherFrames: string[] = [];
@@ -178,8 +184,11 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
       className="min-h-screen bg-background"
       style={{ backgroundImage: "radial-gradient(rgba(60,50,45,0.10) 1.4px, transparent 1.4px)", backgroundSize: "22px 22px" }}
     >
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-        <h1 className="text-ink" style={{ fontSize: "1.5rem" }}>Sneha&rsquo;s Photobooth</h1>
+      <header className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-6 py-5">
+        <div className="flex items-center gap-3">
+          <HomeButton onClick={onHome} />
+          <h1 className="hidden text-ink sm:block" style={{ fontSize: "1.5rem" }}>Sneha&rsquo;s Photobooth</h1>
+        </div>
         <span
           className={`inline-flex items-center gap-2 rounded-full px-3 py-1 ${connected ? "bg-sage/50 text-ink" : "bg-blush-soft text-clay"}`}
           style={{ fontSize: "0.8rem" }}

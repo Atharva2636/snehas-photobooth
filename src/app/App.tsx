@@ -8,6 +8,8 @@ import { makeRoomId, readRoomFromUrl, type Filter, type Template } from "./lib/b
 import { usePeerBooth, type BoothMessage } from "./lib/usePeerBooth";
 import type { Pair } from "./lib/compose";
 
+const HOST_KEY = "snehas-hosted-room";
+
 interface RoomState {
   roomId: string;
   isHost: boolean;
@@ -15,9 +17,11 @@ interface RoomState {
 
 function Room({ roomId, isHost, onExit }: RoomState & { onExit: () => void }) {
   const onMessageRef = useRef<((m: BoothMessage) => void) | undefined>(undefined);
-  const { status, error, localStream, remoteStream, sendData, placeholder } = usePeerBooth({
+  const [restart, setRestart] = useState(0);
+  const { status, localStream, remoteStream, sendData, placeholder, shutdown } = usePeerBooth({
     roomId,
     isHost,
+    restart,
     onMessage: (m) => onMessageRef.current?.(m),
   });
 
@@ -29,27 +33,17 @@ function Room({ roomId, isHost, onExit }: RoomState & { onExit: () => void }) {
     if (status === "connected") setEntered(true);
   }, [status]);
 
-  if (error) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-6 text-center">
-        <div className="max-w-md rounded-3xl border border-border bg-card p-8">
-          <h1 className="text-ink" style={{ fontSize: "1.4rem" }}>Something went sideways</h1>
-          <p className="mt-3 text-ink-soft">{error}</p>
-          <button onClick={onExit} className="mt-6 rounded-full bg-primary px-6 py-3 text-primary-foreground">
-            Back home
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   if (result) {
     return (
       <ExportScreen
         template={result.template}
         filter={result.filter}
         pairs={result.pairs}
-        onRetake={() => setResult(null)}
+        onHome={onExit}
+        onRetake={() => {
+          setResult(null);
+          setRestart((r) => r + 1); // re-acquire camera + reconnect for another round
+        }}
       />
     );
   }
@@ -57,7 +51,7 @@ function Room({ roomId, isHost, onExit }: RoomState & { onExit: () => void }) {
   if (!entered) {
     return (
       <div className="min-h-screen bg-background">
-        <WaitingRoom roomId={roomId} isHost={isHost} status={status} localStream={localStream} />
+        <WaitingRoom roomId={roomId} isHost={isHost} status={status} localStream={localStream} onHome={onExit} />
         <div className="mx-auto max-w-lg px-6 pb-12 text-center">
           <button
             onClick={() => setEntered(true)}
@@ -80,7 +74,11 @@ function Room({ roomId, isHost, onExit }: RoomState & { onExit: () => void }) {
       placeholder={placeholder}
       sendData={sendData}
       onMessageRef={onMessageRef}
-      onComplete={(_c, template, filter, pairs) => setResult({ template, filter, pairs })}
+      onHome={onExit}
+      onComplete={(_c, template, filter, pairs) => {
+        shutdown(); // release the hardware webcam once we leave the studio
+        setResult({ template, filter, pairs });
+      }}
     />
   );
 }
@@ -88,19 +86,22 @@ function Room({ roomId, isHost, onExit }: RoomState & { onExit: () => void }) {
 export default function App() {
   const [room, setRoom] = useState<RoomState | null>(null);
 
-  // On load, join as guest if a /room/<id> (or legacy ?room=) link was opened.
+  // On load, join the room in the URL. If this tab created the room, rejoin as
+  // host (survives refresh); otherwise join as guest.
   useEffect(() => {
     const r = readRoomFromUrl();
-    if (r) setRoom({ roomId: r, isHost: false });
+    if (r) setRoom({ roomId: r, isHost: sessionStorage.getItem(HOST_KEY) === r });
   }, []);
 
   const createRoom = () => {
     const id = makeRoomId();
+    sessionStorage.setItem(HOST_KEY, id);
     window.history.pushState({}, "", `/room/${id}`);
     setRoom({ roomId: id, isHost: true });
   };
 
   const exit = () => {
+    sessionStorage.removeItem(HOST_KEY);
     window.history.pushState({}, "", "/");
     setRoom(null);
   };

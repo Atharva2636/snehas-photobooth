@@ -1,5 +1,21 @@
 import { STICKERS, svgToDataUrl, type Filter, type PlacedSticker, type Template } from "./booth";
 
+/** Resolve once the video is actually decoding frames (avoids blank captures). */
+export function waitForVideoReady(video: HTMLVideoElement | null, timeout = 4000): Promise<void> {
+  return new Promise((resolve) => {
+    if (!video) return resolve();
+    const ready = () => video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
+    if (ready()) return resolve();
+    const start = Date.now();
+    const iv = setInterval(() => {
+      if (ready() || Date.now() - start > timeout) {
+        clearInterval(iv);
+        resolve();
+      }
+    }, 60);
+  });
+}
+
 /** Grab a single video frame at its native resolution (mirrored, like a selfie). */
 export function grabFrame(video: HTMLVideoElement): string {
   const w = video.videoWidth || 1280;
@@ -69,44 +85,39 @@ export interface ComposeArgs {
   filter: Filter;
   pairs: Pair[];
   stickers: PlacedSticker[];
+  frameColor?: string; // paper color behind the cells
 }
 
 const CELL_W = 560;
 const GAP_IN = 14;
 const GAP = 30;
 const PAD = 44;
-const HEADER_H = 130;
-const FOOTER_H = 96;
+const TOP_MARGIN = 52;
+const BOTTOM_MARGIN = 52;
 
-/** Compose the final high-resolution photo strip onto a canvas. */
-export async function composeStrip({ template, filter, pairs, stickers }: ComposeArgs): Promise<HTMLCanvasElement> {
+/**
+ * Compose the final high-resolution photo strip. No text watermark is baked into
+ * the image; branding lives in the surrounding UI instead.
+ */
+export async function composeStrip({ template, filter, pairs, stickers, frameColor = "#f6ead9" }: ComposeArgs): Promise<HTMLCanvasElement> {
   const cellH = Math.round(CELL_W / template.ratio);
   const pairW = CELL_W * 2 + GAP_IN;
   const { cols, rows } = template;
 
   const width = PAD * 2 + cols * pairW + (cols - 1) * GAP;
-  const height = HEADER_H + rows * cellH + (rows - 1) * GAP + FOOTER_H + PAD;
+  const height = TOP_MARGIN + rows * cellH + (rows - 1) * GAP + BOTTOM_MARGIN;
 
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d")!;
 
-  // Warm paper background
+  // Warm paper background + inner tinted panel
   ctx.fillStyle = "#fdf6ee";
   ctx.fillRect(0, 0, width, height);
-  ctx.fillStyle = "#f6ead9";
+  ctx.fillStyle = frameColor;
   roundRect(ctx, 12, 12, width - 24, height - 24, 26);
   ctx.fill();
-
-  // Header
-  ctx.fillStyle = "#3c322d";
-  ctx.textAlign = "center";
-  ctx.font = "600 54px 'Playfair Display', Georgia, serif";
-  ctx.fillText("Sneha’s Photobooth", width / 2, HEADER_H - 52);
-  ctx.fillStyle = "#8a7a6e";
-  ctx.font = "400 22px 'Inter', sans-serif";
-  ctx.fillText("presented by Nichepicks", width / 2, HEADER_H - 20);
 
   // Preload all frames
   const loaded = await Promise.all(
@@ -120,7 +131,7 @@ export async function composeStrip({ template, filter, pairs, stickers }: Compos
     const col = i % cols;
     const row = Math.floor(i / cols);
     const px = PAD + col * (pairW + GAP);
-    const py = HEADER_H + row * (cellH + GAP);
+    const py = TOP_MARGIN + row * (cellH + GAP);
     const frame = loaded[i];
     if (!frame) continue;
 
@@ -150,16 +161,7 @@ export async function composeStrip({ template, filter, pairs, stickers }: Compos
     }
   }
 
-  // Footer band
-  ctx.fillStyle = "#8a7a6e";
-  ctx.textAlign = "center";
-  ctx.font = "italic 400 26px 'Playfair Display', Georgia, serif";
-  const date = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
-  ctx.fillText(`made with love · ${date}`, width / 2, height - FOOTER_H + 46);
-  ctx.font = "400 18px 'Inter', sans-serif";
-  ctx.fillText("nichepicks · Rajnandgaon", width / 2, height - FOOTER_H + 76);
-
-  // Stickers on top
+  // Stickers on top (with per-sticker scale + rotation)
   const stickerImgs = await Promise.all(
     stickers.map(async (s) => {
       const def = STICKERS.find((d) => d.id === s.id);
@@ -171,7 +173,11 @@ export async function composeStrip({ template, filter, pairs, stickers }: Compos
     if (!item) continue;
     const { img, s } = item;
     const size = 150 * s.scale;
-    ctx.drawImage(img, s.x * width - size / 2, s.y * height - size / 2, size, size);
+    ctx.save();
+    ctx.translate(s.x * width, s.y * height);
+    ctx.rotate(((s.rot ?? 0) * Math.PI) / 180);
+    ctx.drawImage(img, -size / 2, -size / 2, size, size);
+    ctx.restore();
   }
 
   return canvas;
