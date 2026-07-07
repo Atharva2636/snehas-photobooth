@@ -20,7 +20,6 @@ interface Props {
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// Soft staggered fade-in for items inside the toolbar drawers.
 const drawerItem = (i: number) => ({
   initial: { opacity: 0, y: 10 },
   animate: { opacity: 1, y: 0 },
@@ -40,12 +39,9 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
   const [shot, setShot] = useState(0);
   const [flash, setFlash] = useState(false);
 
-  const partnerFrames = useRef<Record<number, string>>({});
   const remoteApply = useRef(false);
-
   const myRole: "self" | "partner" = isHost ? "self" : "partner";
 
-  // Register the P2P message handler.
   useEffect(() => {
     onMessageRef.current = (msg: BoothMessage) => {
       if (msg.type === "config") {
@@ -59,8 +55,6 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
         const t = TEMPLATES.find((x) => x.id === msg.template) ?? template;
         const f = FILTERS.find((x) => x.id === msg.filter) ?? filter;
         runSequence(t, f, false);
-      } else if (msg.type === "frame") {
-        partnerFrames.current[msg.index as number] = msg.data as string;
       }
     };
     return () => {
@@ -69,32 +63,21 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [template, filter]);
 
-  // Broadcast config changes to the partner so both strips stay identical.
   useEffect(() => {
     if (remoteApply.current) return;
     sendData({ type: "config", template: template.id, filter: filter.id });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [template, filter]);
 
-  const waitForPartnerFrame = async (i: number): Promise<string> => {
-    const deadline = Date.now() + 6000;
-    while (Date.now() < deadline) {
-      if (partnerFrames.current[i]) return partnerFrames.current[i];
-      await wait(80);
-    }
-    // Fallback: reuse own frame if partner never arrives.
-    return grabFrame(myVideo.current!);
-  };
-
   const runSequence = async (tpl: Template, flt: Filter, initiator: boolean) => {
     if (capturing) return;
-    partnerFrames.current = {};
     setCapturing(true);
     if (initiator) sendData({ type: "start", template: tpl.id, filter: flt.id });
 
-    // Ensure the video is actually decoding frames before we draw, otherwise the
-    // canvas grabs a blank/transparent frame.
     await waitForVideoReady(myVideo.current);
+    if (connected && partnerVideo.current) {
+      await waitForVideoReady(partnerVideo.current);
+    }
 
     const selfFrames: string[] = [];
     const otherFrames: string[] = [];
@@ -106,30 +89,30 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
         await wait(850);
       }
 
-      // Countdown hit zero: grab the raw pixels synchronously FIRST — before any
-      // setState/flash — so nothing blocks the main thread between 0 and the draw.
+      // 1. Grab own frame instantly
       const mine = grabFrame(myVideo.current!);
       selfFrames[i] = mine;
 
-      // Then fire UI feedback and share the captured frame.
-      setCount(null);
-      setFlash(true);
-      sendData({ type: "frame", index: i, data: mine });
-
-      let partner: string;
-      if (connected && remoteStream) {
-        partner = await waitForPartnerFrame(i);
-      } else {
-        partner = mine; // solo mode fallback
+      // 2. Grab partner's frame instantly from the live video feed (no network sharing needed!)
+      let partner = mine; // fallback for solo mode
+      if (connected && partnerVideo.current && partnerVideo.current.readyState >= 2) {
+        try {
+          partner = grabFrame(partnerVideo.current);
+        } catch (e) {
+          console.error("Canvas read error:", e);
+        }
       }
       otherFrames[i] = partner;
 
+      setCount(null);
+      setFlash(true);
+      
       await wait(140);
       setFlash(false);
       await wait(550);
     }
 
-    // Host frames sit on the left, guest frames on the right (identical on both devices).
+    // Compose identical layouts for both users. Left is always Host, Right is always Guest.
     const pairs: Pair[] = tpl.cuts
       ? Array.from({ length: tpl.cuts }, (_, i) =>
           myRole === "self"
@@ -167,7 +150,6 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
             <CamStage videoRef={partnerVideo} stream={remoteStream} label="Partner" mirror={false} filterCss={filter.css} />
           </div>
 
-          {/* Synchronized countdown / flash overlay */}
           <AnimatePresence>
             {capturing && (
               <motion.div
@@ -199,7 +181,6 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
           </AnimatePresence>
         </div>
 
-        {/* Toolbar */}
         <div className="mt-6 rounded-[2rem] border border-border bg-card p-5 shadow-sm">
           <div className="mb-4 flex gap-2">
             <ToolTab active={tab === "layout"} onClick={() => setTab("layout")} icon={LayoutGrid} label="Templates" />
@@ -266,9 +247,6 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
   );
 }
 
-// Module-level so the <video> elements stay mounted across countdown re-renders
-// (otherwise their srcObject/readyState would be wiped, causing blank captures
-// and the guest's own feed disappearing).
 function CamStage({
   videoRef,
   stream,
@@ -284,7 +262,6 @@ function CamStage({
   note?: string;
   filterCss: string;
 }) {
-  // Assign the stream directly to the video element the moment either changes.
   useEffect(() => {
     const v = videoRef.current;
     if (v && v.srcObject !== stream) v.srcObject = stream;
@@ -295,7 +272,6 @@ function CamStage({
       className="relative aspect-[4/3] w-full overflow-hidden rounded-3xl border border-border bg-cream-deep shadow-sm"
       style={{ filter: filterCss }}
     >
-      {/* Video stays mounted; a placeholder overlay covers it until the stream binds. */}
       <video
         ref={videoRef}
         autoPlay
