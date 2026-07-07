@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
 import { Camera, Loader2, Sliders, LayoutGrid, Wifi, WifiOff } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { FILTERS, TEMPLATES, type Filter, type Template } from "../lib/booth";
@@ -44,13 +44,6 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
   const remoteApply = useRef(false);
 
   const myRole: "self" | "partner" = isHost ? "self" : "partner";
-
-  useEffect(() => {
-    if (myVideo.current && localStream) myVideo.current.srcObject = localStream;
-  }, [localStream]);
-  useEffect(() => {
-    if (partnerVideo.current && remoteStream) partnerVideo.current.srcObject = remoteStream;
-  }, [remoteStream]);
 
   // Register the P2P message handler.
   useEffect(() => {
@@ -147,43 +140,8 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
     onComplete(canvas, tpl, flt, pairs);
   };
 
-  const CamStage = ({ videoRef, label, mirror, live, note }: { videoRef: React.RefObject<HTMLVideoElement>; label: string; mirror: boolean; live: boolean; note?: string }) => (
-    <div
-      className="relative aspect-[4/3] w-full overflow-hidden rounded-3xl border border-border bg-cream-deep shadow-sm"
-      style={{ filter: filter.css }}
-    >
-      {live ? (
-        <video ref={videoRef} autoPlay playsInline muted className={`h-full w-full object-cover ${mirror ? "-scale-x-100" : ""}`} />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center text-ink-soft" style={{ filter: "none" }}>
-          <div className="flex flex-col items-center gap-2">
-            <Loader2 size={26} className="animate-spin" />
-            <span style={{ fontSize: "0.85rem" }}>waiting for partner…</span>
-          </div>
-        </div>
-      )}
-      <span className="absolute bottom-3 left-3 rounded-full bg-white/80 px-3 py-1 text-ink" style={{ fontSize: "0.75rem", filter: "none" }}>
-        {label}
-      </span>
-      {note && (
-        <motion.span
-          animate={{ opacity: [0.65, 1, 0.65] }}
-          transition={{ repeat: Infinity, duration: 2.4, ease: "easeInOut" }}
-          className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full bg-white/85 px-3 py-1 text-clay"
-          style={{ fontSize: "0.72rem", filter: "none" }}
-        >
-          <Camera size={13} />
-          {note}
-        </motion.span>
-      )}
-    </div>
-  );
-
   return (
-    <div
-      className="min-h-screen bg-background"
-      style={{ backgroundImage: "radial-gradient(rgba(60,50,45,0.10) 1.4px, transparent 1.4px)", backgroundSize: "22px 22px" }}
-    >
+    <div className="booth-bg min-h-screen">
       <header className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-6 py-5">
         <div className="flex items-center gap-3">
           <HomeButton onClick={onHome} />
@@ -201,8 +159,8 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
       <main className="mx-auto max-w-6xl px-6 pb-16">
         <div className="relative">
           <div className="grid gap-5 lg:grid-cols-2">
-            <CamStage videoRef={myVideo} label="You" mirror live={!!localStream} note={placeholder ? "Webcam active on live deployment" : undefined} />
-            <CamStage videoRef={partnerVideo} label="Partner" mirror={false} live={!!remoteStream} />
+            <CamStage videoRef={myVideo} stream={localStream} label="You" mirror filterCss={filter.css} note={placeholder ? "Webcam active on live deployment" : undefined} />
+            <CamStage videoRef={partnerVideo} stream={remoteStream} label="Partner" mirror={false} filterCss={filter.css} />
           </div>
 
           {/* Synchronized countdown / flash overlay */}
@@ -300,6 +258,63 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
           )}
         </div>
       </main>
+    </div>
+  );
+}
+
+// Module-level so the <video> elements stay mounted across countdown re-renders
+// (otherwise their srcObject/readyState would be wiped, causing blank captures
+// and the guest's own feed disappearing).
+function CamStage({
+  videoRef,
+  stream,
+  label,
+  mirror,
+  note,
+  filterCss,
+}: {
+  videoRef: RefObject<HTMLVideoElement>;
+  stream: MediaStream | null;
+  label: string;
+  mirror: boolean;
+  note?: string;
+  filterCss: string;
+}) {
+  // Assign the stream directly to the video element the moment either changes.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (v && v.srcObject !== stream) v.srcObject = stream;
+  }, [stream, videoRef]);
+
+  return (
+    <div
+      className="relative aspect-[4/3] w-full overflow-hidden rounded-3xl border border-border bg-cream-deep shadow-sm"
+      style={{ filter: filterCss }}
+    >
+      {/* Video stays mounted; a placeholder overlay covers it until the stream binds. */}
+      <video ref={videoRef} autoPlay playsInline muted className={`h-full w-full object-cover ${mirror ? "-scale-x-100" : ""}`} />
+      {!stream && (
+        <div className="absolute inset-0 flex items-center justify-center text-ink-soft" style={{ filter: "none" }}>
+          <div className="flex flex-col items-center gap-2">
+            <Loader2 size={26} className="animate-spin" />
+            <span style={{ fontSize: "0.85rem" }}>waiting for partner…</span>
+          </div>
+        </div>
+      )}
+      <span className="absolute bottom-3 left-3 rounded-full bg-white/80 px-3 py-1 text-ink" style={{ fontSize: "0.75rem", filter: "none" }}>
+        {label}
+      </span>
+      {note && (
+        <motion.span
+          animate={{ opacity: [0.65, 1, 0.65] }}
+          transition={{ repeat: Infinity, duration: 2.4, ease: "easeInOut" }}
+          className="absolute bottom-3 right-3 inline-flex items-center gap-1.5 rounded-full bg-white/85 px-3 py-1 text-clay"
+          style={{ fontSize: "0.72rem", filter: "none" }}
+        >
+          <Camera size={13} />
+          {note}
+        </motion.span>
+      )}
     </div>
   );
 }

@@ -45,8 +45,7 @@ export function WaitingRoom({ roomId, isHost, status, localStream, onHome }: Pro
 
   return (
     <div
-      className="relative min-h-screen bg-background flex items-center justify-center px-6 py-12"
-      style={{ backgroundImage: "radial-gradient(rgba(60,50,45,0.10) 1.4px, transparent 1.4px)", backgroundSize: "22px 22px" }}
+      className="booth-bg relative min-h-screen flex items-center justify-center px-6 py-12"
     >
       <div className="absolute left-6 top-6">
         <HomeButton onClick={onHome} />

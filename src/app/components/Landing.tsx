@@ -8,11 +8,6 @@ interface Props {
   onCreate: () => void;
 }
 
-const dotted = {
-  backgroundImage: "radial-gradient(rgba(60,50,45,0.10) 1.4px, transparent 1.4px)",
-  backgroundSize: "22px 22px",
-};
-
 // Scattered scrapbook stickers around the hero, like the reference boards.
 const floaters: { key: string; id: string; top: string; left: string; rot: number; size: number }[] = [
   { key: "a", id: "bow", top: "16%", left: "5%", rot: -14, size: 62 },
@@ -44,7 +39,7 @@ const reveal = (delay = 0) => ({
 
 export function Landing({ onCreate }: Props) {
   return (
-    <div className="min-h-screen bg-background" style={dotted}>
+    <div className="booth-bg min-h-screen">
       <NavBar onOpenStudio={onCreate} cta="Open Studio" />
 
       <section className="relative mx-auto max-w-6xl px-6 pt-6 pb-20">

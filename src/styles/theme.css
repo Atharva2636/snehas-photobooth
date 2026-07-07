@@ -19,6 +19,12 @@
   --lavender-gray: #e4e0ec;
   --butter-cream: #f6ead9;
   --dusty-sky: #d9e6ec;
+  /* Very-light pastel washes for backgrounds */
+  --matcha: #eef3eb;
+  --buttercream: #fffdf7;
+  --lilac: #f4f0f7;
+  --peach: #fdf2f0;
+  --sky: #f0f6fa;
   --background: #fdf6ee;
   --foreground: #3c322d;
   --card: #fffaf3;
@@ -215,4 +221,18 @@
     font-weight: var(--font-weight-normal);
     line-height: 1.5;
   }
+}
+
+/* Soft multi-pastel wash + dotted paper, shared by every screen. Every tint is
+   very light so dark brown/charcoal text stays highly readable. */
+.booth-bg {
+  background-color: var(--buttercream);
+  background-image:
+    radial-gradient(rgba(60, 50, 45, 0.08) 1.4px, transparent 1.4px),
+    radial-gradient(1100px 620px at 8% -8%, var(--peach), transparent 60%),
+    radial-gradient(1000px 640px at 100% 0%, var(--sky), transparent 55%),
+    radial-gradient(900px 700px at 100% 100%, var(--lilac), transparent 55%),
+    radial-gradient(950px 720px at 0% 105%, var(--matcha), transparent 55%);
+  background-size: 22px 22px, auto, auto, auto, auto;
+  background-attachment: fixed;
 }

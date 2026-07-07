@@ -102,10 +102,7 @@ export function ExportScreen({ template, filter, pairs, onHome, onRetake }: Prop
   };
 
   return (
-    <div
-      className="min-h-screen bg-background"
-      style={{ backgroundImage: "radial-gradient(rgba(60,50,45,0.10) 1.4px, transparent 1.4px)", backgroundSize: "22px 22px" }}
-    >
+    <div className="booth-bg min-h-screen">
       <div className="mx-auto flex max-w-5xl items-center px-6 pt-6">
         <HomeButton onClick={onHome} />
       </div>

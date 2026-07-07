@@ -70,7 +70,11 @@ export function usePeerBooth({ roomId, isHost, restart = 0, onMessage }: Options
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error("mediadevices unavailable");
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1920 }, height: { ideal: 1080 }, facingMode: "user" },
+          video: {
+            width: { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 },
+            facingMode: "user",
+          },
           audio: false,
         });
       } catch {
