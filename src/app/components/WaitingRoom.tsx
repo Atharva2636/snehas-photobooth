@@ -52,7 +52,7 @@ export function WaitingRoom({ roomId, isHost, status, localStream, onHome }: Pro
       </div>
       <div className="w-full max-w-lg rounded-[2rem] border border-border bg-card p-8 shadow-sm text-center">
         <div className="relative mx-auto mb-6 aspect-[4/3] w-full overflow-hidden rounded-3xl bg-cream-deep">
-          <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover -scale-x-100" />
+          <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover -scale-x-100" style={{ willChange: "transform, filter" }} />
           <span className="absolute bottom-3 left-3 rounded-full bg-white/80 px-3 py-1 text-ink" style={{ fontSize: "0.75rem" }}>
             You
           </span>

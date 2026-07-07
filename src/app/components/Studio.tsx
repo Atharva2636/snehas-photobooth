@@ -105,11 +105,15 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
         setCount(n);
         await wait(850);
       }
+
+      // Countdown hit zero: grab the raw pixels synchronously FIRST — before any
+      // setState/flash — so nothing blocks the main thread between 0 and the draw.
+      const mine = grabFrame(myVideo.current!);
+      selfFrames[i] = mine;
+
+      // Then fire UI feedback and share the captured frame.
       setCount(null);
       setFlash(true);
-      await wait(140);
-
-      const mine = grabFrame(myVideo.current!);
       sendData({ type: "frame", index: i, data: mine });
 
       let partner: string;
@@ -118,9 +122,9 @@ export function Studio({ isHost, connected, localStream, remoteStream, placehold
       } else {
         partner = mine; // solo mode fallback
       }
-      selfFrames[i] = mine;
       otherFrames[i] = partner;
 
+      await wait(140);
       setFlash(false);
       await wait(550);
     }
@@ -292,7 +296,14 @@ function CamStage({
       style={{ filter: filterCss }}
     >
       {/* Video stays mounted; a placeholder overlay covers it until the stream binds. */}
-      <video ref={videoRef} autoPlay playsInline muted className={`h-full w-full object-cover ${mirror ? "-scale-x-100" : ""}`} />
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className={`h-full w-full object-cover ${mirror ? "-scale-x-100" : ""}`}
+        style={{ willChange: "transform, filter" }}
+      />
       {!stream && (
         <div className="absolute inset-0 flex items-center justify-center text-ink-soft" style={{ filter: "none" }}>
           <div className="flex flex-col items-center gap-2">
